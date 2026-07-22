@@ -1,8 +1,22 @@
 import os
 import random
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
+# --- Flask Server for Keep-Alive ---
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Bot is alive and running 24/7!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
+
+# --- Telegram Bot Config ---
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "6313249215"))
 
@@ -50,6 +64,10 @@ async def auto_react(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Reaction Error: {e}")
 
 if __name__ == "__main__":
+    # Flask Server को Background thread में चालू करें
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # Telegram Bot Polling चालू करें
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
