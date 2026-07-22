@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 import os
 
 TOKEN = os.getenv("8834794181:AAEAsfcNLR1sum8nJfi7xm7Bykkzvq7MDfI")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456789"))
+ADMIN_ID = int(os.getenv("ADMIN_ID", "6313249215"))
 
 IS_ACTIVE = True
 REACTIONS = ["👍", "❤️", "🔥", "👏", "😍"]
