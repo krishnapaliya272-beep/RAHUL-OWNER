@@ -55,7 +55,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("off", turn_off))
     app.add_handler(CommandHandler("status", status_cmd))
 
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL, auto_react))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react))
 
     app.run_polling()
 
