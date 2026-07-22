@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import os
 
-TOKEN = os.getenv("8834794181:AAEAsfcNLR1sum8nJfi7xm7Bykkzvq7MDfI")
+TOKEN = os.getenv("8834794181:AAH2DtNVLqw_Zebno1PTCxwh516sd4-7PKY")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "6313249215"))
 
 IS_ACTIVE = True
