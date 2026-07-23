@@ -1,81 +1,75 @@
 import os
 import random
+import asyncio
 import threading
 from flask import Flask
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Bot, Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-# --- Flask Server for Render Keep-Alive ---
+# --- Web Server for Render Keep-Alive ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Bot is alive and running 24/7!", 200
+    return "Multi-Bot Reaction System Active!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# --- Telegram Bot Config ---
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "6313249215"))
+# --- Fetch Environment Variables ---
+# यह अपने आप Render की Environment सेटिंग्स से टोकन उठा लेगा
+RAW_TOKENS = [
+    os.getenv("BOT_TOKEN"),
+    os.getenv("BOT_TOKEN_2"),
+    os.getenv("BOT_TOKEN_3"),
+    os.getenv("BOT_TOKEN_4"),
+    os.getenv("BOT_TOKEN_5"),
+]
 
-IS_ACTIVE = True
-REACTIONS = ["👍", "❤️", "🔥", "👏", "😍"]
+# खाली या न मिलने वाले टोकन हटाकर एक्टिव लिस्ट बनाएँ
+BOT_TOKENS = [t.strip() for t in RAW_TOKENS if t and len(t.strip()) > 10]
+BOT_INSTANCES = [Bot(token=t) for t in BOT_TOKENS]
 
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "**Auto Reaction Bot Active**\n\n"
-        "Commands:\n"
-        "▶️ /on - Turn ON auto reaction\n"
-        "⏸️ /off - Turn OFF auto reaction\n"
-        "📊 /status - View current status",
-        parse_mode="Markdown"
-    )
+REACTIONS_POOL = ["👍", "❤️", "🔥", "👏", "😍", "🎉", "🤩", "💯"]
 
-async def turn_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global IS_ACTIVE
-    if update.effective_user.id != ADMIN_ID:
-        return
-    IS_ACTIVE = True
-    await update.message.reply_text("✅ **Auto Reaction Enabled!**", parse_mode="Markdown")
+async def send_single_reaction(bot_instance: Bot, chat_id: int, message_id: int, emoji: str):
+    """हर एक बॉट से अलग-अलग रिएक्शन भेजने के लिए"""
+    try:
+        await bot_instance.set_reaction(chat_id=chat_id, message_id=message_id, reaction=[emoji])
+    except Exception as e:
+        print(f"Error from bot {bot_instance.id}: {e}")
 
-async def turn_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global IS_ACTIVE
-    if update.effective_user.id != ADMIN_ID:
-        return
-    IS_ACTIVE = False
-    await update.message.reply_text("⏸️ **Auto Reaction Disabled!**", parse_mode="Markdown")
-
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    status_text = "🟢 **ON**" if IS_ACTIVE else "🔴 **OFF**"
-    await update.message.reply_text(f"📊 Status: {status_text}", parse_mode="Markdown")
-
-async def auto_react(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global IS_ACTIVE
-    if not IS_ACTIVE:
-        return
-
+async def auto_react_multi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.channel_post:
-        try:
-            # 4 से 5 रैंडम इमोजी चुनेगा और एक साथ लगाएगा
-            chosen_emojis = random.sample(REACTIONS, k=random.randint(4, 5))
-            await update.channel_post.set_reaction(reaction=chosen_emojis)
-        except Exception as e:
-            print(f"Reaction Error: {e}")
+        chat_id = update.channel_post.chat.id
+        message_id = update.channel_post.message_id
+
+        num_bots = len(BOT_INSTANCES)
+        if num_bots == 0:
+            return
+
+        # जितने बॉट मौजूद हैं, उतने रैंडम इमोजी चुनें
+        chosen_emojis = random.sample(REACTIONS_POOL, k=min(num_bots, len(REACTIONS_POOL)))
+
+        # सभी बॉट्स से एक साथ रिएक्शनTrigger करें
+        tasks = []
+        for i, bot_inst in enumerate(BOT_INSTANCES):
+            tasks.append(send_single_reaction(bot_inst, chat_id, message_id, chosen_emojis[i]))
+        
+        await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    # Flask Server को background में चलाने के लिए
+    # Background Thread में Web Server चालू करें
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Telegram Bot Polling
-    app = ApplicationBuilder().token(TOKEN).build()
+    if not BOT_TOKENS:
+        print("Error: Render Environment में कोई BOT_TOKEN नहीं मिला!")
+    else:
+        print(f"Total synced bots running: {len(BOT_TOKENS)}")
+        
+        # मुख्य बॉट (BOT_TOKEN) को पोलिंग पर रखें
+        main_app = ApplicationBuilder().token(BOT_TOKENS[0]).build()
+        main_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react_multi))
 
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("on", turn_on))
-    app.add_handler(CommandHandler("off", turn_off))
-    app.add_handler(CommandHandler("status", status_cmd))
-
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react))
-
-    app.run_polling()
+        main_app.run_polling(drop_pending_updates=True)
