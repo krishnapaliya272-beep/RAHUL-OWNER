@@ -5,7 +5,7 @@ from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-# --- Flask Server for Keep-Alive ---
+# --- Flask Server for Render Keep-Alive ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -58,16 +58,17 @@ async def auto_react(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.channel_post:
         try:
-            chosen_emoji = random.choice(REACTIONS)
-            await update.channel_post.set_reaction(reaction=chosen_emoji)
+            # 4 से 5 रैंडम इमोजी चुनेगा और एक साथ लगाएगा
+            chosen_emojis = random.sample(REACTIONS, k=random.randint(4, 5))
+            await update.channel_post.set_reaction(reaction=chosen_emojis)
         except Exception as e:
             print(f"Reaction Error: {e}")
 
 if __name__ == "__main__":
-    # Flask Server को Background thread में चालू करें
+    # Flask Server को background में चलाने के लिए
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Telegram Bot Polling चालू करें
+    # Telegram Bot Polling
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
