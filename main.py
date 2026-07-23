@@ -1,11 +1,23 @@
 import os
 import random
 import asyncio
-from flask import Flask, request
-from telegram import Update
+import threading
+from flask import Flask
+from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-# --- Configs from Render Environment ---
+# --- Keep-Alive Web Server for Render ---
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Multi-Bot Reaction System Active 24/7!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
+
+# --- Fetch Environment Variables ---
 RAW_TOKENS = [
     os.getenv("BOT_TOKEN"),
     os.getenv("BOT_TOKEN_2") or os.getenv("BOT_TOKEN2"),
@@ -15,17 +27,15 @@ RAW_TOKENS = [
 ]
 
 BOT_TOKENS = [t.strip() for t in RAW_TOKENS if t and len(t.strip()) > 10]
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 REACTIONS_POOL = ["👍", "❤️", "🔥", "👏", "😍", "🎉", "🤩", "💯"]
 
-web_app = Flask(__name__)
+# Initialized Bot Objects
+BOT_INSTANCES = []
 
-# Global instances list
-BOT_APPS = []
-
-async def send_single_reaction(app_instance, chat_id: int, message_id: int, emoji: str):
+async def send_single_reaction(bot_obj: Bot, chat_id: int, message_id: int, emoji: str):
+    """हर बॉट से अलग-अलग रिएक्शन भेजता है"""
     try:
-        await app_instance.bot.set_reaction(chat_id=chat_id, message_id=message_id, reaction=[emoji])
+        await bot_obj.set_reaction(chat_id=chat_id, message_id=message_id, reaction=[emoji])
     except Exception as e:
         print(f"Reaction Error: {e}")
 
@@ -34,58 +44,39 @@ async def auto_react_multi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = update.channel_post.chat.id
         message_id = update.channel_post.message_id
 
-        num_bots = len(BOT_APPS)
+        num_bots = len(BOT_INSTANCES)
         if num_bots == 0:
             return
 
         chosen_emojis = random.sample(REACTIONS_POOL, k=min(num_bots, len(REACTIONS_POOL)))
 
         tasks = []
-        for i, app_inst in enumerate(BOT_APPS):
-            tasks.append(send_single_reaction(app_inst, chat_id, message_id, chosen_emojis[i]))
+        for i, bot_obj in enumerate(BOT_INSTANCES):
+            tasks.append(send_single_reaction(bot_obj, chat_id, message_id, chosen_emojis[i]))
         
         await asyncio.gather(*tasks)
 
-@web_app.route('/')
-def home():
-    return "Multi-Bot Webhook Active!", 200
-
-@web_app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.method == "POST":
-        try:
-            json_data = request.get_json(force=True)
-            if BOT_APPS:
-                update = Update.de_json(json_data, BOT_APPS[0].bot)
-                asyncio.run(BOT_APPS[0].process_update(update))
-        except Exception as e:
-            print(f"Webhook Error: {e}")
-    return "OK", 200
-
-async def setup_bots_and_webhook():
-    global BOT_APPS
-    if not BOT_TOKENS:
-        print("No tokens found!")
-        return
-
-    # Setup All Bots
-    for token in BOT_TOKENS:
-        app = ApplicationBuilder().token(token).build()
-        await app.initialize()
-        await app.start()
-        BOT_APPS.append(app)
-
-    # Attach handler to main bot
-    BOT_APPS[0].add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react_multi))
-
-    # Set Webhook for Main Bot
-    webhook_url = f"{RENDER_URL}/webhook"
-    await BOT_APPS[0].bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    print(f"✅ Webhook set successfully to: {webhook_url}")
+async def post_init(main_app):
+    """सभी बॉट्स को सही इवेंट लूप के अंदर शुरू करता है"""
+    global BOT_INSTANCES
+    BOT_INSTANCES.append(main_app.bot)
+    
+    for token in BOT_TOKENS[1:]:
+        b = Bot(token=token)
+        await b.initialize() # प्रॉपरली सेशंस चालू करता है
+        BOT_INSTANCES.append(b)
+        
+    print(f"✅ Successfully initialized {len(BOT_INSTANCES)} bots!")
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(setup_bots_and_webhook())
+    # Web server को background thread में चालू करें
+    threading.Thread(target=run_flask, daemon=True).start()
 
-    port = int(os.environ.get("PORT", 8080))
-    web_app.run(host="0.0.0.0", port=port)
+    if not BOT_TOKENS:
+        print("Error: Render Environment में कोई BOT_TOKEN नहीं मिला!")
+    else:
+        # Main bot receiver setup
+        main_app = ApplicationBuilder().token(BOT_TOKENS[0]).post_init(post_init).build()
+        main_app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react_multi))
+
+        main_app.run_polling(drop_pending_updates=True)
