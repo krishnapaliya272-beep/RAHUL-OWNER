@@ -2,68 +2,53 @@ import os
 import random
 import threading
 from flask import Flask
-import telebot
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-# --- Web Server for Render ---
+# --- Keep-Alive Web Server for Render ---
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Multi-Bot Reaction Active!", 200
+    return "Single Bot Reaction Active!", 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host="0.0.0.0", port=port)
 
-# --- Environment Tokens ---
-RAW_TOKENS = [
-    os.getenv("BOT_TOKEN"),
-    os.getenv("BOT_TOKEN_2") or os.getenv("BOT_TOKEN2"),
-    os.getenv("BOT_TOKEN_3") or os.getenv("BOT_TOKEN3"),
-    os.getenv("BOT_TOKEN_4") or os.getenv("BOT_TOKEN4"),
-    os.getenv("BOT_TOKEN_5") or os.getenv("BOT_TOKEN5"),
-]
-
-BOT_TOKENS = [t.strip() for t in RAW_TOKENS if t and len(t.strip()) > 10]
+# Render Environment से टोकन उठाएगा
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 REACTIONS_POOL = ["👍", "❤️", "🔥", "👏", "😍", "🎉", "🤩", "💯"]
 
-# Create TeleBot Instances
-BOT_INSTANCES = [telebot.TeleBot(token, threaded=False) for token in BOT_TOKENS]
-
-def send_reaction(bot_obj, chat_id, message_id, emoji):
-    try:
-        bot_obj.set_message_reaction(chat_id=chat_id, message_id=message_id, reaction=[telebot.types.ReactionTypeEmoji(emoji)])
-    except Exception as e:
-        print(f"Reaction Error: {e}")
+async def auto_react(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.channel_post:
+        chat_id = update.channel_post.chat.id
+        message_id = update.channel_post.message_id
+        
+        # रैंडम इमोजी चुनकर पोस्ट पर चिपकाएगा
+        chosen_emoji = random.choice(REACTIONS_POOL)
+        
+        try:
+            await context.bot.set_reaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                reaction=[chosen_emoji]
+            )
+            print(f"Reaction {chosen_emoji} added successfully!")
+        except Exception as e:
+            print(f"Error setting reaction: {e}")
 
 if __name__ == "__main__":
-    # Flask Web Server
+    # Web server को background thread में चालू करें
     threading.Thread(target=run_flask, daemon=True).start()
 
-    if not BOT_INSTANCES:
-        print("No tokens provided!")
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN Environment Variable नहीं मिला!")
     else:
-        main_bot = BOT_INSTANCES[0]
-
-        @main_bot.channel_post_handler(func=lambda message: True)
-        def handle_channel_post(message):
-            chat_id = message.chat.id
-            msg_id = message.message_id
-            
-            num_bots = len(BOT_INSTANCES)
-            chosen_emojis = random.sample(REACTIONS_POOL, k=min(num_bots, len(REACTIONS_POOL)))
-
-            # Threading to send reactions in parallel
-            threads = []
-            for idx, b_inst in enumerate(BOT_INSTANCES):
-                t = threading.Thread(target=send_reaction, args=(b_inst, chat_id, msg_id, chosen_emojis[idx]))
-                threads.append(t)
-                t.start()
-
-            for t in threads:
-                t.join()
-
-        print(f"✅ Total Synced Bots: {len(BOT_INSTANCES)}")
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
         
-        # Clear old conflict updates and run
-        main_bot.infinity_polling(skip_pending=True)
+        # चैनल पोस्ट पर रिएक्शन लगाने का हैंडलर
+        app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, auto_react))
+
+        print("Bot Started...")
+        app.run_polling(drop_pending_updates=True)
